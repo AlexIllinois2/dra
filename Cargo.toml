@@ -50,3 +50,10 @@ to download release assets from GitHub.
 Provides interactive and non-interactive ways to download assets
 to meet your needs in different scenarios.
 """
+
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/dra", dest = "/usr/bin/dra", mode = "755" },
+  { source = "README.md", dest = "/usr/share/doc/dra/README.md", mode = "644" },
+  { source = "LICENSE", dest = "/usr/share/licenses/dra/LICENSE", mode = "644" },
+]
