@@ -1,0 +1,256 @@
+
+dra 自定义下载前缀修改计划
+基于对 devmatteini/dra 源码（main 分支，v0.10.2）的梳理，核心改动集中在 src/github/client.rs 与 src/github/constants.rs，并辅以 root_command.rs（CLI 参数）、env_var.rs（环境变量读取）和 download_handler.rs（透传配置）的串联。下面给出可落地的分阶段方案。
+一、源码现状与改造点定位
+dra 中所有出网请求都通过 GithubClient（src/github/client.rs），其涉及两类 URL：
+URL 类型	生成位置	示例	用途	
+Releases API URL	get_release_url() 函数	https://api.github.com/repos/{owner}/{repo}/releases/latest	拉取 release 元数据	
+Asset 下载 URL	Asset.download_url 字段（来自 release_response.rs 的 browser_download_url，以及 tarball_url/zipball_url）	https://github.com/{owner}/{repo}/releases/download/{tag}/{name}	实际文件下载	
+download_asset_stream() 直接拿 asset.download_url 走 self.get() 发请求，因此只要在「URL 进入 get() 之前」做一次前缀改写，即可覆盖全部下载流量。
+环境变量基础设施已具备：env_var.rs 提供 boolean() / string() 两个助手，constants.rs 已定义 DRA_GITHUB_TOKEN、DRA_DISABLE_GITHUB_AUTHENTICATION 等常量，新增前缀类常量可直接复用这套机制。
+二、设计方案：前缀模式区分
+国内加速站对 GitHub URL 的改写规则不统一，需抽象成两种"前缀模式"：
+flowchart LR
+  A[原始 URL<br/>https://github.com/foo/bar/...] --> B{前缀模式?}
+  B -->|prepend 保留完整原URL| C["https://gitproxy.com/<br/>+ https://github.com/foo/bar/..."]
+  B -->|replace-host 去掉 https://github.com| D["https://xget.xi-xu.me/gh/<br/>+ foo/bar/..."]
+  C --> E[实际请求 URL]
+  D --> E
+prepend 模式：在原完整 URL 前拼接 prefix。适用于 https://gitproxy.com/https://github.com/... 这类把目标 URL 整体作为路径的代理。
+replace-host 模式：剥掉原 URL 的 https://github.com/ 后再拼 prefix。适用于 https://xget.xi-xu.me/gh/foo/bar/... 这类把 github.com 替换为子路径的代理。
+API 域名（api.github.com）与下载域名（github.com）通常由不同镜像承接，所以前缀配置拆成两组：asset-prefix（覆盖 github.com 的下载与源码包 URL）与 api-prefix（覆盖 api.github.com 的 API URL）。两者各自独立选择 prepend / replace-host 模式。
+三、分阶段实施步骤
+阶段 1：新增配置常量与解析
+文件：src/github/constants.rs（参照已有 DRA_GITHUB_TOKEN 等常量风格）
+// 资源下载前缀（覆盖 https://github.com/...）
+pub const DRA_ASSET_PREFIX: &str = "DRA_ASSET_PREFIX";
+// 资源下载前缀模式：prepend | replace-host（默认 prepend）
+pub const DRA_ASSET_PREFIX_MODE: &str = "DRA_ASSET_PREFIX_MODE";
+// API 前缀（覆盖 https://api.github.com/...），可空
+pub const DRA_API_PREFIX: &str = "DRA_API_PREFIX";
+pub const DRA_API_PREFIX_MODE: &str = "DRA_API_PREFIX_MODE";
+新增配置结构体（建议放在 src/github/client.rs 或新建 src/github/proxy.rs）：
+#[derive(Debug, Clone, Default)]
+pub struct ProxyConfig {
+    pub asset_prefix: Option<String>,
+    pub asset_mode: PrefixMode,
+    pub api_prefix: Option<String>,
+    pub api_mode: PrefixMode,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefixMode {
+    Prepend,      // 保留完整原 URL，直接前缀拼接
+    ReplaceHost,  // 剥掉 https://github.com 或 https://api.github.com 后拼接
+}
+impl Default for PrefixMode {
+    fn default() -> Self { PrefixMode::Prepend }
+}
+impl ProxyConfig {
+    pub fn from_environment() -> Self {
+        Self {
+            asset_prefix: env_var::string(DRA_ASSET_PREFIX),
+            asset_mode: parse_mode(env_var::string(DRA_ASSET_PREFIX_MODE)),
+            api_prefix: env_var::string(DRA_API_PREFIX),
+            api_mode: parse_mode(env_var::string(DRA_API_PREFIX_MODE)),
+        }
+    }
+    pub fn rewrite_asset(&self, url: &str) -> String {
+        rewrite_url(url, self.asset_prefix.as_deref(), self.asset_mode, "https://github.com/")
+    }
+    pub fn rewrite_api(&self, url: &str) -> String {
+        rewrite_url(url, self.api_prefix.as_deref(), self.api_mode, "https://api.github.com/")
+    }
+}
+fn parse_mode(s: Option<String>) -> PrefixMode {
+    match s.as_deref().map(|x| x.to_lowercase()).as_deref() {
+        Some("replace-host") | Some("replace_host") => PrefixMode::ReplaceHost,
+        _ => PrefixMode::Prepend,
+    }
+}
+fn rewrite_url(url: &str, prefix: Option<&str>, mode: PrefixMode, host: &str) -> String {
+    let Some(prefix) = prefix else { return url.to_string(); };
+    // 规整：保证 prefix 以 / 结尾，避免拼接出 //xxx
+    let prefix = prefix.trim_end_matches('/').to_string();
+    match mode {
+        PrefixMode::Prepend => format!("{}/{}", prefix, url),
+        PrefixMode::ReplaceHost => {
+            // 仅当 URL 以目标 host 开头才替换，否则原样返回（避免误伤已带前缀的 URL）
+            if let Some(rest) = url.strip_prefix(host) {
+                format!("{}/{}", prefix, rest)
+            } else {
+                url.to_string()
+            }
+        }
+    }
+}
+边界处理要点：
+prefix 末尾的 / 去重，统一用 format!("{}/{}", prefix, rest)，避免出现 //foo。
+replace-host 只在 URL 真正以 https://github.com/ 或 https://api.github.com/ 开头时才替换，其余原样返回（例如已重写的二次调用幂等）。
+browser_download_url 有时是 https://github.com/.../releases/download/...，tarball_url/zipball_url 是 https://api.github.com/repos/.../tarball/...。若用户只配了 asset_prefix，源码包（tarball/zipball）URL 含 api.github.com 不会被 rewrite_asset 命中。建议在 rewrite_asset 里同时尝试剥 https://github.com/ 与 https://api.github.com/，或者让源码包 URL 也走 asset 改写——下面阶段 2 会处理。
+阶段 2：在 client.rs 注入 ProxyConfig 并改写 URL
+文件：src/github/client.rs
+给 GithubClient 增加 proxy: ProxyConfig 字段：
+pub struct GithubClient {
+    pub token: Option<String>,
+    proxy: ProxyConfig,
+}
+impl GithubClient {
+    pub fn new(token: Option<String>) -> Self {
+        Self { token, proxy: ProxyConfig::from_environment() }
+    }
+    // from_environment() 不变，内部走 Self::new
+    ...
+}
+改写 get_release_url 的调用点（注意：原函数返回的是 https://api.github.com/...，需要在调用 get() 前过一次 proxy.rewrite_api）：
+pub fn get_release(
+    &self,
+    repository: &Repository,
+    tag: Option<&Tag>,
+) -> Result<Release, GithubError> {
+    let url = get_release_url(repository, tag);
+    let url = self.proxy.rewrite_api(&url);   // 新增
+    let response = self.get(&url, Some(Duration::from_secs(5)))
+        .call()
+        .map_err(GithubError::from)?;
+    ...
+}
+改写 download_asset_stream，在请求前对 asset.download_url 过 rewrite_asset：
+pub fn download_asset_stream(
+    &self,
+    asset: &Asset,
+) -> Result<(impl Read + Send, Option<u64>), GithubError> {
+    let url = self.proxy.rewrite_asset(&asset.download_url);   // 新增
+    let response = self.get(&url, None)
+        .header("Accept", "application/vnd.github.raw")
+        .call()
+        .map_err(GithubError::from)?;
+    ...
+}
+源码包 URL（tarball/zipball）来自 API 返回的 tarball_url/zipball_url，通常是 https://api.github.com/repos/.../tarball/...。由于它们在 release.rs 的 Release::from_response 里被原样写入 Asset.download_url，统一走 rewrite_asset 即可——只需让 rewrite_asset 同时识别 api.github.com 与 github.com 两个 host。把阶段 1 的 rewrite_url 调用改成：
+pub fn rewrite_asset(&self, url: &str) -> String {
+    let Some(prefix) = &self.asset_prefix else { return url.to_string(); };
+    let prefix = prefix.trim_end_matches('/');
+    match self.asset_mode {
+        PrefixMode::Prepend => format!("{}/{}", prefix, url),
+        PrefixMode::ReplaceHost => {
+            for host in ["https://github.com/", "https://api.github.com/"] {
+                if let Some(rest) = url.strip_prefix(host) {
+                    return format!("{}/{}", prefix, rest);
+                }
+            }
+            url.to_string()
+        }
+    }
+}
+阶段 3：CLI 参数透传（可选但推荐）
+环境变量方案已足够使用；若希望命令行临时覆盖，在 src/cli/root_command.rs 的 Download 变体里新增参数：
+Download {
+    #[arg(value_parser = Repository::try_parse)]
+    repo: Repository,
+    // ... 原有 select/automatic/tag/output/install/install_file ...
+    /// 下载资源时使用的前缀（覆盖 https://github.com/...）
+    #[arg(long, value_name = "URL", env = "DRA_ASSET_PREFIX")]
+    asset_prefix: Option<String>,
+    /// 前缀模式：prepend | replace-host
+    #[arg(long, value_name = "MODE", env = "DRA_ASSET_PREFIX_MODE", default_value = "prepend")]
+    asset_prefix_mode: Option<String>,
+    /// API 请求时使用的前缀（覆盖 https://api.github.com/...）
+    #[arg(long, value_name = "URL", env = "DRA_API_PREFIX")]
+    api_prefix: Option<String>,
+    #[arg(long, value_name = "MODE", env = "DRA_API_PREFIX_MODE", default_value = "prepend")]
+    api_prefix_mode: Option<String>,
+},
+随后让 DownloadHandler（src/cli/download_handler.rs）把这些参数构造为 ProxyConfig 传给 GithubClient::new_with_proxy，并优先级为：CLI 参数 > 环境变量 > None。download_handler.rs 的 run() 目前用 GithubClient::from_environment()，需要改为接受外部传入的 proxy 配置。
+Untag 命令同样会调用 get_release（经 fetch_release_for），如果想让 untag 也走加速，参数需在 Untag 变体里同样添加，或直接依赖环境变量。
+阶段 4：测试用例
+文件：src/github/client.rs（mod tests）或 tests/ 集成测试
+针对 rewrite_url 补单测（参照 repository.rs 已有的 assert_contains 风格）：
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn prepend_mode_keeps_full_url() {
+        let cfg = ProxyConfig {
+            asset_prefix: Some("https://gitproxy.com".into()),
+            asset_mode: PrefixMode::Prepend,
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.rewrite_asset("https://github.com/foo/bar/releases/download/v1/a.tar.gz"),
+            "https://gitproxy.com/https://github.com/foo/bar/releases/download/v1/a.tar.gz"
+        );
+    }
+    #[test]
+    fn replace_host_strips_github_prefix() {
+        let cfg = ProxyConfig {
+            asset_prefix: Some("https://xget.xi-xu.me/gh".into()),
+            asset_mode: PrefixMode::ReplaceHost,
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.rewrite_asset("https://github.com/foo/bar/releases/download/v1/a.tar.gz"),
+            "https://xget.xi-xu.me/gh/foo/bar/releases/download/v1/a.tar.gz"
+        );
+    }
+    #[test]
+    fn no_prefix_returns_original() {
+        let cfg = ProxyConfig::default();
+        let url = "https://github.com/foo/bar";
+        assert_eq!(cfg.rewrite_asset(url), url);
+    }
+    #[test]
+    fn trailing_slash_normalized() {
+        let cfg = ProxyConfig {
+            asset_prefix: Some("https://gitproxy.com/".into()),
+            asset_mode: PrefixMode::Prepend,
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.rewrite_asset("https://github.com/foo/bar"),
+            "https://gitproxy.com/https://github.com/foo/bar"  // 不出现双斜杠
+        );
+    }
+    #[test]
+    fn api_rewrite_only_matches_api_host() {
+        let cfg = ProxyConfig {
+            api_prefix: Some("https://gh.api.proxy".into()),
+            api_mode: PrefixMode::ReplaceHost,
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.rewrite_api("https://api.github.com/repos/foo/bar/releases/latest"),
+            "https://gh.api.proxy/repos/foo/bar/releases/latest"
+        );
+    }
+}
+集成测试（tests/）可用 mockito 或直接对一个本地 mock server 跑 download 子命令，断言请求 URL 命中预期前缀。dra 已用 assert_cmd + predicates，可沿用。
+四、使用示例
+# gitproxy（prepend 模式，默认）
+export DRA_ASSET_PREFIX="https://gitproxy.com"
+dra download -a devmatteini/dra-tests
+# xget（replace-host 模式）
+export DRA_ASSET_PREFIX="https://xget.xi-xu.me/gh"
+export DRA_ASSET_PREFIX_MODE="replace-host"
+dra download -a devmatteini/dra-tests
+# 同时给 API 配镜像（如某些支持 api.github.com 的代理）
+export DRA_API_PREFIX="https://gh.api.proxy"
+export DRA_API_PREFIX_MODE="replace-host"
+dra download devmatteini/dra-tests
+# 命令行临时覆盖（实现阶段 3 后）
+dra download --asset-prefix https://gitproxy.com devmatteini/dra-tests
+五、常见坑位提示
+认证头：get() 对所有请求都带 Authorization: token ...。部分代理会原样转发，没问题；但少数纯文件代理可能因带 token 而报 400。若用公开镜像下载公共 release，可设 DRA_DISABLE_GITHUB_AUTHENTICATION=1 关闭认证，避免代理误判。
+HTTP 重定向：GitHub 的 releases/download/... 会 302 跳转到 objects.githubusercontent.com。ureq 默认跟随重定向，但跳转后的域名不在 github.com 改写范围内——大多数代理（gitproxy/xget）会自己处理这层跳转，所以代理前缀应作用在第一跳即可；若使用不支持跟随跳转的纯转发代理，可能仍会落到 objects.githubusercontent.com 被墙。
+源码包 URL：tarball/zipball 是 api.github.com 域，纯 asset 代理（如 xget 的 /gh/）不一定支持。如果用户只配 asset_prefix 而没配 api_prefix，遇到选 "Source code (tar.gz)" 时可能失败。建议在 README/CLI help 里说明：源码包下载需要 api.github.com 可达或额外配置 DRA_API_PREFIX。
+URL 编码：browser_download_url 已是合法 URL，无需额外 urlencoding；prepend 模式下原 URL 直接拼在路径里，部分代理要求对原 URL 做一次 urlencode（如某些旧版 ghproxy）。若实测发现 404，可在 Prepend 分支里加一个 urlencoding::encode(url)（dra 已依赖 urlencoding crate）的开关，例如新增 DRA_ASSET_PREFIX_ENCODE=1。
+二次幂等：rewrite_* 应在 URL 已带前缀时不再叠加，可在函数入口检测 url.starts_with(prefix) 提前返回。
+六、改动文件清单
+文件	改动类型	说明	
+src/github/constants.rs	新增	4 个环境变量常量	
+src/github/client.rs（或新建 src/github/proxy.rs）	新增+修改	ProxyConfig/PrefixMode 结构、rewrite_url，GithubClient 增字段，get_release/download_asset_stream 注入改写	
+src/cli/root_command.rs	修改	Download（及可选 Untag）新增 4 个 CLI 参数	
+src/cli/download_handler.rs	修改	接收 CLI proxy 参数并传给 GithubClient	
+src/cli/github_release.rs	修改	fetch_release_for 透传 proxy（若改了 GithubClient 构造方式）	
+tests/ 或 src/github/client.rs#tests	新增	rewrite_url 单测 + 集成测试	
+README.md / CHANGELOG.md	文档	新增用法说明	
+最小可用版本可只做阶段 1+2（纯环境变量驱动，零 CLI 改动），约 150 行代码即可上线；阶段 3 的 CLI 透传作为增强项按需追加。整体改动内聚在 GithubClient，对 installer、system 等模块零侵入。

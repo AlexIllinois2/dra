@@ -4,8 +4,9 @@ use crate::cli::progress_bar::ProgressBar;
 use crate::cli::result::{HandlerError, HandlerResult};
 use crate::cli::select_assets;
 use crate::cli::spinner::Spinner;
-use crate::github::client::GithubClient;
+use crate::github::client::{resolve_token, GithubClient};
 use crate::github::error::GithubError;
+use crate::github::proxy::{PrefixMode, ProxyConfig};
 use crate::github::release::{Asset, Release, Tag};
 use crate::github::repository::Repository;
 use crate::github::tagged_asset::TaggedAsset;
@@ -23,6 +24,7 @@ pub struct DownloadHandler {
     tag: Option<Tag>,
     output: Option<PathBuf>,
     install: Install,
+    proxy: ProxyConfig,
 }
 
 enum DownloadMode {
@@ -84,19 +86,28 @@ impl DownloadHandler {
         output: Option<PathBuf>,
         install: bool,
         install_file: Option<Vec<String>>,
+        asset_prefix: Option<String>,
+        asset_prefix_mode: Option<String>,
+        api_prefix: Option<String>,
+        api_prefix_mode: Option<String>,
     ) -> Self {
         let install = Install::new(install, install_file, &repository);
         DownloadHandler {
             repository,
-            mode: DownloadMode::new(select.clone(), automatic),
+            mode: DownloadMode::new(select, automatic),
             tag: tag.map(Tag),
             output,
             install,
+            proxy: proxy_from_cli_args(asset_prefix, asset_prefix_mode, api_prefix, api_prefix_mode),
         }
     }
 
     pub fn run(&self) -> HandlerResult {
-        let github = GithubClient::from_environment();
+        let github = GithubClient::from_token_and_proxy(
+            // 让 from_environment 的逻辑负责 token 解析，但 proxy 从 self.proxy 传入
+            resolve_token(),
+            self.proxy.clone(),
+        );
         let release = self.fetch_release(&github)?;
         let selected_asset = self.select_asset(release)?;
         let output_path = self.choose_output_path(&selected_asset.name);
@@ -339,6 +350,29 @@ fn cwd() -> Result<PathBuf, HandlerError> {
 fn remove_temporary_file(path: &Path) -> Result<(), HandlerError> {
     std::fs::remove_file(path)
         .map_err(|x| HandlerError::new(format!("Unable to delete temporary file: {}", x)))
+}
+
+/// 从 CLI 参数构造 ProxyConfig。
+/// 由于 clap 的 `env` 属性已自动处理 CLI > env 优先级，
+/// 这里只需将 Option<String> 直接映射到 ProxyConfig。
+fn proxy_from_cli_args(
+    asset_prefix: Option<String>,
+    asset_prefix_mode: Option<String>,
+    api_prefix: Option<String>,
+    api_prefix_mode: Option<String>,
+) -> ProxyConfig {
+    ProxyConfig {
+        asset_prefix,
+        asset_mode: match asset_prefix_mode.as_deref().map(|x| x.to_lowercase()).as_deref() {
+            Some("replace-host") | Some("replace_host") => PrefixMode::ReplaceHost,
+            _ => PrefixMode::Prepend,
+        },
+        api_prefix,
+        api_mode: match api_prefix_mode.as_deref().map(|x| x.to_lowercase()).as_deref() {
+            Some("replace-host") | Some("replace_host") => PrefixMode::ReplaceHost,
+            _ => PrefixMode::Prepend,
+        },
+    }
 }
 
 #[cfg(test)]

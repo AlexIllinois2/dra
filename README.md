@@ -275,6 +275,53 @@ You need to install [GitHub cli](https://cli.github.com/) and then run `gh auth 
 If you would like to disable GitHub authentication, you can export the environment variable
 `DRA_DISABLE_GITHUB_AUTHENTICATION=true`
 
+### 下载代理
+
+如果所在网络无法直接访问 GitHub，可以通过环境变量或 CLI 参数配置下载前缀，让 `dra` 走代理/镜像下载资源。
+
+支持两种前缀模式：
+
+- **prepend**（默认）：在原 URL 前完整拼接前缀。适用于 `https://gitproxy.com/https://github.com/...` 这类代理。
+- **replace-host**：剥掉原 URL 的 `https://github.com/` 再拼接前缀。适用于 `https://xget.xi-xu.me/gh/foo/bar/...` 这类镜像。
+
+下载前缀拆成两组独立配置：
+
+| 配置 | 对应域名 | 作用 |
+|---|---|---|
+| `asset-prefix` | `github.com`, `api.github.com` | 覆盖实际文件下载和源码包（tarball/zipball）URL |
+| `api-prefix` | `api.github.com` | 覆盖 API 请求（拉取 release 元数据）URL |
+
+仅在需要为 API 和下载流量配置不同镜像时才需设置 `api-prefix`；大多数场景下只配 `asset-prefix` 即可。
+
+**环境变量方式：**
+
+```shell
+# gitproxy（prepend 模式，默认）
+export DRA_ASSET_PREFIX="https://gitproxy.com"
+dra download -a devmatteini/dra-tests
+
+# xget（replace-host 模式）
+export DRA_ASSET_PREFIX="https://xget.xi-xu.me/gh"
+export DRA_ASSET_PREFIX_MODE="replace-host"
+dra download -a devmatteini/dra-tests
+
+# 同时给 API 配镜像
+export DRA_API_PREFIX="https://gh.api.proxy"
+export DRA_API_PREFIX_MODE="replace-host"
+dra download devmatteini/dra-tests
+```
+
+**CLI 参数方式（临时覆盖，优先级高于环境变量）：**
+
+```shell
+dra download --asset-prefix https://gitproxy.com devmatteini/dra-tests
+dra download --asset-prefix https://xget.xi-xu.me/gh --asset-prefix-mode replace-host devmatteini/dra-tests
+```
+
+> [!NOTE]
+> - `asset-prefix` 同时也改写源码包（tarball/zipball）URL，纯下载镜像（如 xget 的 `/gh/`）可能不支持 API 域名的源码包。若遇到源码包下载失败，可额外配置 `DRA_API_PREFIX`。
+> - 部分代理可能因携带 `Authorization` 头而报 400。可用 `DRA_DISABLE_GITHUB_AUTHENTICATION=1` 关闭认证后重试。
+
 ### Shell completion
 
 Generate shell completion

@@ -7,6 +7,7 @@ use crate::cli::download_handler::DownloadHandler;
 use crate::cli::result::{HandlerError, HandlerResult};
 use crate::cli::root_command::{Cli, Command};
 use crate::cli::untag_handler::UntagHandler;
+use crate::github::proxy::{PrefixMode, ProxyConfig};
 use clap::Parser;
 use std::process::exit;
 
@@ -45,11 +46,63 @@ fn run(cli: Cli) -> HandlerResult {
             output,
             install,
             install_file,
+            asset_prefix,
+            asset_prefix_mode,
+            api_prefix,
+            api_prefix_mode,
         } => {
-            DownloadHandler::new(repo, select, automatic, tag, output, install, install_file).run()
+            DownloadHandler::new(
+                repo,
+                select,
+                automatic,
+                tag,
+                output,
+                install,
+                install_file,
+                asset_prefix,
+                asset_prefix_mode,
+                api_prefix,
+                api_prefix_mode,
+            )
+            .run()
         }
-        Command::Untag { repo } => UntagHandler::new(repo).run(),
+        Command::Untag {
+            repo,
+            asset_prefix,
+            asset_prefix_mode,
+            api_prefix,
+            api_prefix_mode,
+        } => {
+            let proxy = proxy_from_cli_args(
+                asset_prefix,
+                asset_prefix_mode,
+                api_prefix,
+                api_prefix_mode,
+            );
+            UntagHandler::new(repo, proxy).run()
+        }
         Command::Completion { shell } => CompletionHandler::new(shell).run(),
+    }
+}
+
+/// 从 CLI 参数构造 ProxyConfig
+fn proxy_from_cli_args(
+    asset_prefix: Option<String>,
+    asset_prefix_mode: Option<String>,
+    api_prefix: Option<String>,
+    api_prefix_mode: Option<String>,
+) -> ProxyConfig {
+    ProxyConfig {
+        asset_prefix,
+        asset_mode: match asset_prefix_mode.as_deref().map(|x| x.to_lowercase()).as_deref() {
+            Some("replace-host") | Some("replace_host") => PrefixMode::ReplaceHost,
+            _ => PrefixMode::Prepend,
+        },
+        api_prefix,
+        api_mode: match api_prefix_mode.as_deref().map(|x| x.to_lowercase()).as_deref() {
+            Some("replace-host") | Some("replace_host") => PrefixMode::ReplaceHost,
+            _ => PrefixMode::Prepend,
+        },
     }
 }
 

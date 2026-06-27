@@ -25,6 +25,10 @@ use crate::github::repository::Repository;
 /// Download and install multiple executables from tar/zip archive asset:
 /// $ dra download -s helloworld-many-executables-unix.tar.gz -I helloworld-v2 -I random-script devmatteini/dra-tests
 ///
+/// Proxy examples:
+/// $ dra download --asset-prefix https://gitproxy.com devmatteini/dra-tests
+/// $ DRA_ASSET_PREFIX=https://xget.xi-xu.me/gh DRA_ASSET_PREFIX_MODE=replace-host dra download -a devmatteini/dra-tests
+///
 /// More examples can be found at:
 /// - https://github.com/devmatteini/dra#usage
 /// - https://github.com/devmatteini/dra#examples
@@ -102,6 +106,28 @@ pub enum Command {
             verbatim_doc_comment
         )]
         install_file: Option<Vec<String>>,
+
+        /// Download asset URL prefix (overrides https://github.com/...).
+        /// Example: https://gitproxy.com (prepend mode) or https://xget.xi-xu.me/gh (replace-host mode).
+        /// Can also be set via DRA_ASSET_PREFIX environment variable.
+        #[arg(long, value_name = "URL", env = "DRA_ASSET_PREFIX", verbatim_doc_comment)]
+        asset_prefix: Option<String>,
+
+        /// Download asset prefix mode: prepend | replace-host (default: prepend).
+        /// Can also be set via DRA_ASSET_PREFIX_MODE environment variable.
+        #[arg(long, value_name = "MODE", env = "DRA_ASSET_PREFIX_MODE", default_value = "prepend", verbatim_doc_comment)]
+        asset_prefix_mode: Option<String>,
+
+        /// API request URL prefix (overrides https://api.github.com/...).
+        /// Example: https://gh.api.proxy.
+        /// Can also be set via DRA_API_PREFIX environment variable.
+        #[arg(long, value_name = "URL", env = "DRA_API_PREFIX", verbatim_doc_comment)]
+        api_prefix: Option<String>,
+
+        /// API request prefix mode: prepend | replace-host (default: prepend).
+        /// Can also be set via DRA_API_PREFIX_MODE environment variable.
+        #[arg(long, value_name = "MODE", env = "DRA_API_PREFIX_MODE", default_value = "prepend", verbatim_doc_comment)]
+        api_prefix_mode: Option<String>,
     },
 
     /// Select an asset and generate an untagged version of it
@@ -109,6 +135,28 @@ pub enum Command {
         /// GitHub repository using format {owner}/{repo} or the repository URL https://github.com/{owner}/{repo}
         #[arg(value_parser = Repository::try_parse)]
         repo: Repository,
+
+        /// Download asset URL prefix (overrides https://github.com/...).
+        /// Example: https://gitproxy.com (prepend mode) or https://xget.xi-xu.me/gh (replace-host mode).
+        /// Can also be set via DRA_ASSET_PREFIX environment variable.
+        #[arg(long, value_name = "URL", env = "DRA_ASSET_PREFIX", verbatim_doc_comment)]
+        asset_prefix: Option<String>,
+
+        /// Download asset prefix mode: prepend | replace-host (default: prepend).
+        /// Can also be set via DRA_ASSET_PREFIX_MODE environment variable.
+        #[arg(long, value_name = "MODE", env = "DRA_ASSET_PREFIX_MODE", default_value = "prepend", verbatim_doc_comment)]
+        asset_prefix_mode: Option<String>,
+
+        /// API request URL prefix (overrides https://api.github.com/...).
+        /// Example: https://gh.api.proxy.
+        /// Can also be set via DRA_API_PREFIX environment variable.
+        #[arg(long, value_name = "URL", env = "DRA_API_PREFIX", verbatim_doc_comment)]
+        api_prefix: Option<String>,
+
+        /// API request prefix mode: prepend | replace-host (default: prepend).
+        /// Can also be set via DRA_API_PREFIX_MODE environment variable.
+        #[arg(long, value_name = "MODE", env = "DRA_API_PREFIX_MODE", default_value = "prepend", verbatim_doc_comment)]
+        api_prefix_mode: Option<String>,
     },
 
     /// Generate shell completion
