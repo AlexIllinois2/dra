@@ -47,12 +47,25 @@ jobs:
           deb=$(ls target/debian/*.deb | head -1)
           cp "$deb" "dra-${{ github.ref_name }}-amd64.deb"
 
+      # ---------------- 新增：生成 RPM 包 ----------------
+      - name: Build .rpm package
+        run: |
+          cargo install --locked cargo-generate-rpm
+          cargo generate-rpm
+
+      - name: Rename rpm to include version
+        run: |
+          rpm=$(ls target/generate-rpm/*.rpm | head -1)
+          cp "$rpm" "dra-${{ github.ref_name }}-x86_64.rpm"
+      # --------------------------------------------------
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dra-${{ github.ref_name }}-linux-amd64.tar.gz
             dra-${{ github.ref_name }}-amd64.deb
+            dra-${{ github.ref_name }}-x86_64.rpm
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
