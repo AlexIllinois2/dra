@@ -1,0 +1,58 @@
+name: Release (fork)
+
+on:
+  push:
+    tags:
+      # 同时支持上游风格 0.10.2 和 v 前缀 v0.10.2
+      - '[0-9]+.[0-9]+.[0-9]+*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:   # 允许手动触发，方便调试
+
+permissions:
+  contents: write      # 发布 Release 必需
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Strip binary
+        run: strip target/release/dra
+
+      - name: Create tar.gz archive
+        run: |
+          mkdir -p staging/dra
+          cp target/release/dra staging/dra/
+          cp README.md LICENSE staging/dra/ 2>/dev/null || true
+          cd staging
+          tar -czf ../dra-${{ github.ref_name }}-linux-amd64.tar.gz dra
+
+      - name: Build .deb package
+        run: |
+          cargo install --version 3.7.0 --locked cargo-deb
+          cargo deb --strip
+
+      - name: Rename deb to include version
+        run: |
+          deb=$(ls target/debian/*.deb | head -1)
+          cp "$deb" "dra-${{ github.ref_name }}-amd64.deb"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dra-${{ github.ref_name }}-linux-amd64.tar.gz
+            dra-${{ github.ref_name }}-amd64.deb
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
