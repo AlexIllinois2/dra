@@ -9,7 +9,8 @@ A command line tool to download release assets from GitHub.
 [Installation](#installation) •
 [Usage](#usage) •
 [Contributing](#contributing) •
-[License](#license)
+[License](#license) •
+[加速下载](#下载代理)
 
 ![dra demo](./assets/demo.gif)
 
