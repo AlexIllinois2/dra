@@ -8,6 +8,8 @@ A command line tool to download release assets from GitHub.
 [Why should I use dra?](#why-should-i-use-dra) •
 [Installation](#installation) •
 [Usage](#usage) •
+[Portable App Installation](#portable-app-installation) •
+[Lifecycle Management](#lifecycle-management) •
 [Contributing](#contributing) •
 [License](#license) •
 [加速下载](#下载代理)
@@ -27,6 +29,9 @@ You can do everything `dra` does with the official [GitHub cli](https://cli.gith
 - [Automatically select and download](#automatic) an asset based on your operating system and architecture
 - [Download and install assets](#install-assets), with support for the most common formats (e.g. tar/zip archives,
   deb/rpm packages...)
+- [Portable App Installation](#portable-app-installation) — download GUI applications and install them with .desktop shortcuts,
+  systemd services, and autostart support
+- [Lifecycle Management](#lifecycle-management) — `list`, `remove`, and `update` installed applications from a local registry
 
 ## Installation
 
@@ -112,6 +117,8 @@ Follow the installation instructions on how to use the [automated bash script](#
 - [Download assets with non-interactive mode](#non-interactive-download)
 - [Download options](#download-options)
 - [Install assets](#install-assets)
+- [Portable App Installation](#portable-app-installation)
+- [Lifecycle Management](#lifecycle-management)
 - [Authentication](#authentication)
 - [Shell completion](#shell-completion)
 - [Examples](#examples)
@@ -252,6 +259,97 @@ You can also specify this option multiple times to install multiples executables
 ```shell
 dra download -s helloworld-many-executables-unix.tar.gz -I helloworld-v2 -I random-script devmatteini/dra-tests
 ```
+
+### Portable App Installation
+
+Download and install a portable GUI application from a GitHub release asset (tar.gz) into `~/.local/app/<name>/`.
+
+This automatically generates `.desktop` shortcuts, optional systemd user services, bin symlinks, and an uninstall script.
+
+```shell
+# Download and install a portable app (e.g. VS Code)
+dra install-app microsoft/vscode --bin bin/code --name vscode
+
+# With custom icon and systemd service
+dra install-app microsoft/vscode -s '*x64.tar.gz' --bin bin/code --name vscode \
+  --icon share/icons/code.png --service --autostart
+
+# Install from a local tar.gz package (skip GitHub download)
+dra install-app --pkg ./code-server.tar.gz --bin bin/code --name code-server
+
+# Skip confirmation if app directory already exists
+dra install-app --pkg ./local.tar.gz --bin bin/code --name myapp --yes
+```
+
+**What gets installed:**
+
+| Path | Description |
+|---|---|
+| `~/.local/app/<name>/` | Application directory (extracted contents) |
+| `~/.local/bin/<name>` | Symlink to the executable |
+| `~/.local/share/applications/<name>.desktop` | Desktop shortcut (app menu) |
+| `~/.config/systemd/user/<name>.service` | Systemd user service (with `--service`) |
+| `~/.config/autostart/<name>.desktop` | Autostart entry (with `--autostart`) |
+| `~/.local/app/<name>/uninstall.sh` | Uninstall script |
+
+### Lifecycle Management
+
+All installed applications (both `dra download --install` and `dra install-app`) are automatically recorded in a local registry at `~/.local/share/dra/installed_apps.json`. This enables lifecycle management commands.
+
+#### List installed applications
+
+```shell
+dra list
+```
+
+Example output:
+
+```
+Name                 Version        Type             Repository
+--------------------------------------------------------------------------------
+ripgrep              13.0.0         ArchiveBin        BurntSushi/ripgrep
+vscode               1.85.0         PortableApp       microsoft/vscode
+```
+
+#### Remove an installed application
+
+```shell
+# Remove a tool installed via `dra download --install`
+dra remove ripgrep
+# → Removes ~/.local/bin/rg and clears the registry entry
+
+# Remove a portable app installed via `dra install-app`
+dra remove vscode
+# → Removes ~/.local/app/vscode, symlinks, .desktop, .service, and registry entry
+```
+
+The `remove` command handles all install types:
+
+| Install Type | Cleanup Behavior |
+|---|---|
+| `Bin` / `ArchiveBin` / `AppImage` | Deletes executables from `~/.local/bin/` |
+| `PortableApp` | Removes app directory, symlinks, `.desktop`, `.service`, autostart |
+
+#### Update installed applications
+
+```shell
+# Update a specific app
+dra update ripgrep
+
+# Check all installed apps for updates
+dra update
+```
+
+The `update` command:
+
+1. Reads the registry to find installed applications and their versions
+2. Queries GitHub for the latest release tag
+3. Compares versions (normalized, ignoring `v` prefix)
+4. Downloads and installs the new version
+5. Updates the registry with the new version
+
+> [!NOTE]
+> Currently `dra update` supports `Bin`, `ArchiveBin`, and `AppImage` types. For `PortableApp` type, use `dra install-app` with the latest version instead.
 
 ### Authentication
 
