@@ -236,4 +236,19 @@ pub enum Command {
         /// Name of the application to uninstall
         name: String,
     },
+
+    /// Remove an installed application (works for all install types: bin, archive, portable app)
+    Remove {
+        /// Name of the application to remove
+        name: String,
+    },
+
+    /// List all installed applications
+    List,
+
+    /// Update installed application(s) to the latest version
+    Update {
+        /// Name of the application to update (if omitted, all apps will be checked)
+        name: Option<String>,
+    },
 }

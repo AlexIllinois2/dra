@@ -376,6 +376,7 @@ dependencies = [
  "itertools",
  "predicates",
  "serde",
+ "serde_json",
  "tar",
  "tempfile",
  "test-case",

@@ -8,6 +8,8 @@ use crate::github::client::GithubClient;
 use crate::github::release::{Asset, Tag};
 use crate::github::repository::Repository;
 use crate::installer::portable_app::{PortableAppConfig, PortableAppInstaller};
+use crate::registry;
+use crate::registry::app_record::{AppRecord, InstallType};
 use crate::system;
 use crate::system::System;
 use crate::temp_file;
@@ -65,7 +67,7 @@ impl InstallAppHandler {
     }
 
     pub fn run(&self) -> HandlerResult {
-        let pkg_path = if let Some(ref pkg) = self.pkg {
+        let (pkg_path, repo_str, tag) = if let Some(ref pkg) = self.pkg {
             // Local mode: use the provided path directly
             if !pkg.exists() {
                 return Err(HandlerError::new(format!(
@@ -73,7 +75,7 @@ impl InstallAppHandler {
                     pkg.display()
                 )));
             }
-            pkg.clone()
+            (pkg.clone(), "local".to_string(), "unknown".to_string())
         } else {
             // Download mode: fetch from GitHub
             let repo = self
@@ -82,8 +84,9 @@ impl InstallAppHandler {
                 .ok_or_else(|| HandlerError::new("Either --pkg or a repository is required".into()))?;
 
             let github = GithubClient::from_environment();
-            let tag = self.tag.as_ref().map(|t| Tag(t.clone()));
-            let release = fetch_release_for(&github, repo, tag.as_ref())?;
+            let tag_obj = self.tag.as_ref().map(|t| Tag(t.clone()));
+            let release = fetch_release_for(&github, repo, tag_obj.as_ref())?;
+            let release_tag = release.tag.0.clone();
 
             // Select asset
             let selected_asset = self.select_asset(release)?;
@@ -120,7 +123,7 @@ impl InstallAppHandler {
             }
             progress_bar.finish();
 
-            temp_path
+            (temp_path, repo.to_string(), release_tag)
         };
 
         // Derive app name from the filename if not provided
@@ -145,6 +148,21 @@ impl InstallAppHandler {
 
         let result = PortableAppInstaller::run(&pkg_path, config)
             .map_err(|e| HandlerError::new(e))?;
+
+        // Write to registry
+        let record = AppRecord::new(
+            app_name.clone(),
+            repo_str,
+            tag,
+            InstallType::PortableApp,
+            result.app_dir.to_string_lossy().to_string(),
+            vec![app_name.clone()],
+        );
+        let mut reg = registry::Registry::load();
+        reg.add_record(record);
+        if let Err(e) = reg.save() {
+            eprintln!("[!] Failed to save registry: {}", e);
+        }
 
         println!("{}", Color::new("Installation completed!").green());
         println!("{}", result.summary(&app_name));

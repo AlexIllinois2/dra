@@ -16,6 +16,7 @@ mod cli;
 mod env_var;
 mod github;
 mod installer;
+mod registry;
 mod system;
 mod temp_file;
 mod vector;
@@ -116,6 +117,9 @@ fn run(cli: Cli) -> HandlerResult {
         Command::UninstallApp { name } => {
             crate::cli::install_app_handler::handle_uninstall_app(&name)
         }
+        Command::Remove { name } => crate::cli::remove_handler::handle_remove(&name),
+        Command::List => crate::cli::list_handler::handle_list(),
+        Command::Update { name } => crate::cli::update_handler::handle_update(name),
     }
 }
 

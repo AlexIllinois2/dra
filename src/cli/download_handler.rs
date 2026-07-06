@@ -13,6 +13,8 @@ use crate::github::tagged_asset::TaggedAsset;
 use crate::installer::destination::Destination;
 use crate::installer::executable::Executable;
 use crate::installer::install;
+use crate::registry;
+use crate::registry::app_record::{AppRecord, InstallType};
 use crate::{system, vector};
 use std::fs::File;
 use std::io::{Read, Write};
@@ -109,10 +111,11 @@ impl DownloadHandler {
             self.proxy.clone(),
         );
         let release = self.fetch_release(&github)?;
+        let tag = release.tag.0.clone();
         let selected_asset = self.select_asset(release)?;
         let output_path = self.choose_output_path(&selected_asset.name);
         Self::download_asset(&github, &selected_asset, &output_path)?;
-        self.maybe_install(&selected_asset.name, &output_path)?;
+        self.maybe_install(&selected_asset.name, &output_path, &tag)?;
         Ok(())
     }
 
@@ -175,7 +178,7 @@ impl DownloadHandler {
         Ok(())
     }
 
-    fn maybe_install(&self, asset_name: &str, path: &Path) -> Result<(), HandlerError> {
+    fn maybe_install(&self, asset_name: &str, path: &Path, tag: &str) -> Result<(), HandlerError> {
         match &self.install {
             Install::No => Ok(()),
             Install::Yes(executables) => {
@@ -193,7 +196,7 @@ impl DownloadHandler {
                 let output = install(
                     asset_name.to_string(),
                     path,
-                    destination,
+                    destination.clone(),
                     executables.clone(),
                 )
                 .map_err(|x| HandlerError::new(x.to_string()))?;
@@ -206,6 +209,33 @@ impl DownloadHandler {
                     Color::new("Installation completed!").green(),
                 );
                 spinner.finish_with_message(&message);
+
+                // Write to registry
+                let executables_names: Vec<String> = executables.iter().map(|e| e.name()).collect();
+                let installed_path = match &destination {
+                    Destination::Directory(dir) => dir.to_string_lossy().to_string(),
+                    Destination::File(file) => {
+                        if let Some(parent) = file.parent() {
+                            parent.to_string_lossy().to_string()
+                        } else {
+                            file.to_string_lossy().to_string()
+                        }
+                    }
+                };
+                let record = AppRecord::new(
+                    self.repository.repo.clone(),
+                    self.repository.to_string(),
+                    tag.to_string(),
+                    InstallType::ArchiveBin,
+                    installed_path,
+                    executables_names,
+                );
+                let mut reg = registry::Registry::load();
+                reg.add_record(record);
+                if let Err(e) = reg.save() {
+                    eprintln!("[!] Failed to save registry: {}", e);
+                }
+
                 Ok(())
             }
         }
