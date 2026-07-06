@@ -165,4 +165,75 @@ pub enum Command {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+
+    /// Download and install a portable application from a GitHub release asset
+    /// (tar.gz) into ~/.local/app/<name>/
+    ///
+    /// Automatically generates .desktop, .service (optional), symlinks, and
+    /// an uninstall.sh script.
+    ///
+    /// EXAMPLES:
+    /// $ dra install-app microsoft/vscode --bin bin/code --name vscode
+    /// $ dra install-app --pkg ./local.tar.gz --bin bin/code --name myapp
+    /// $ dra install-app owner/repo --recipe ~/.config/dra/recipes/myapp.toml
+    InstallApp {
+        /// GitHub repository using format {owner}/{repo} or the repository URL.
+        /// Not required when --pkg is provided.
+        #[arg(value_parser = Repository::try_parse, required_unless_present = "pkg")]
+        repo: Option<Repository>,
+
+        /// Path to a local tar.gz package (skip GitHub download)
+        #[arg(long, value_name = "PATH", conflicts_with = "repo")]
+        pkg: Option<PathBuf>,
+
+        /// Relative path of the executable inside the package (e.g. "bin/code")
+        #[arg(long, required = true, value_name = "REL_PATH")]
+        bin: String,
+
+        /// Application name (default: derived from package filename)
+        #[arg(long, short, value_name = "NAME")]
+        name: Option<String>,
+
+        /// Relative path of the icon inside the package (e.g. "share/icons/code.png")
+        #[arg(long, value_name = "REL_PATH")]
+        icon: Option<String>,
+
+        /// Path to an external icon file (copied into app dir)
+        #[arg(long, value_name = "PATH")]
+        cicon: Option<PathBuf>,
+
+        /// Generate a systemd user service
+        #[arg(long)]
+        service: bool,
+
+        /// Enable autostart via .desktop symlink
+        #[arg(long)]
+        autostart: bool,
+
+        /// Skip confirmation if app directory already exists
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Select and download the first asset that matches a given pattern
+        #[arg(short, long, value_name = "PATTERN")]
+        select: Option<String>,
+
+        /// Automatically select an asset based on your operating system and architecture
+        #[arg(short, long)]
+        automatic: bool,
+
+        /// Set the tag name for fetching a specific release
+        #[arg(short, long)]
+        tag: Option<String>,
+
+        /// Custom app directory root (default: ~/.local/app)
+        #[arg(long, value_name = "DIR")]
+        app_root: Option<PathBuf>,
+    },
+
+    /// Uninstall a portable application installed by `dra install-app`
+    UninstallApp {
+        /// Name of the application to uninstall
+        name: String,
+    },
 }

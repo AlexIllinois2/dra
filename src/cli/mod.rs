@@ -2,6 +2,7 @@ pub mod color;
 pub mod completion_handler;
 pub mod download_handler;
 mod github_release;
+pub mod install_app_handler;
 mod progress_bar;
 pub mod result;
 pub mod root_command;

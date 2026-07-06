@@ -4,6 +4,7 @@
 use crate::cli::color::Color;
 use crate::cli::completion_handler::CompletionHandler;
 use crate::cli::download_handler::DownloadHandler;
+use crate::cli::install_app_handler::InstallAppHandler;
 use crate::cli::result::{HandlerError, HandlerResult};
 use crate::cli::root_command::{Cli, Command};
 use crate::cli::untag_handler::UntagHandler;
@@ -82,6 +83,39 @@ fn run(cli: Cli) -> HandlerResult {
             UntagHandler::new(repo, proxy).run()
         }
         Command::Completion { shell } => CompletionHandler::new(shell).run(),
+        Command::InstallApp {
+            repo,
+            pkg,
+            bin,
+            name,
+            icon,
+            cicon,
+            service,
+            autostart,
+            yes,
+            select,
+            automatic,
+            tag,
+            app_root,
+        } => InstallAppHandler::new(
+            repo,
+            pkg,
+            bin,
+            name,
+            icon,
+            cicon,
+            service,
+            autostart,
+            yes,
+            select,
+            automatic,
+            tag,
+            app_root,
+        )
+        .run(),
+        Command::UninstallApp { name } => {
+            crate::cli::install_app_handler::handle_uninstall_app(&name)
+        }
     }
 }
 

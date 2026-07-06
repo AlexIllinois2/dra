@@ -8,6 +8,7 @@ pub mod executable;
 mod executable_file_installer;
 mod file;
 mod install;
+pub mod portable_app;
 mod result;
 mod rpm_installer;
 mod seven_zip_archive_installer;
