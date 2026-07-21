@@ -52,6 +52,7 @@ fn run(cli: Cli) -> HandlerResult {
             asset_prefix_mode,
             api_prefix,
             api_prefix_mode,
+            preview,
         } => {
             DownloadHandler::new(
                 repo,
@@ -65,6 +66,7 @@ fn run(cli: Cli) -> HandlerResult {
                 asset_prefix_mode,
                 api_prefix,
                 api_prefix_mode,
+                preview,
             )
             .run()
         }

@@ -128,6 +128,10 @@ pub enum Command {
         /// Can also be set via DRA_API_PREFIX_MODE environment variable.
         #[arg(long, value_name = "MODE", env = "DRA_API_PREFIX_MODE", default_value = "prepend", verbatim_doc_comment)]
         api_prefix_mode: Option<String>,
+
+        /// Only print what would be downloaded, without actually downloading.
+        #[arg(long, verbatim_doc_comment)]
+        preview: bool,
     },
 
     /// Select an asset and generate an untagged version of it

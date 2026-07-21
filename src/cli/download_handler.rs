@@ -27,6 +27,7 @@ pub struct DownloadHandler {
     output: Option<PathBuf>,
     install: Install,
     proxy: ProxyConfig,
+    preview: bool,
 }
 
 enum DownloadMode {
@@ -92,6 +93,7 @@ impl DownloadHandler {
         asset_prefix_mode: Option<String>,
         api_prefix: Option<String>,
         api_prefix_mode: Option<String>,
+        preview: bool,
     ) -> Self {
         let install = Install::new(install, install_file, &repository);
         DownloadHandler {
@@ -101,6 +103,7 @@ impl DownloadHandler {
             output,
             install,
             proxy: proxy_from_cli_args(asset_prefix, asset_prefix_mode, api_prefix, api_prefix_mode),
+            preview,
         }
     }
 
@@ -114,6 +117,11 @@ impl DownloadHandler {
         let tag = release.tag.0.clone();
         let selected_asset = self.select_asset(release)?;
         let output_path = self.choose_output_path(&selected_asset.name);
+        if self.preview {
+            println!("URL: {}", selected_asset.download_url);
+            println!("File: {}", output_path.display());
+            return Ok(());
+        }
         Self::download_asset(&github, &selected_asset, &output_path)?;
         self.maybe_install(&selected_asset.name, &output_path, &tag)?;
         Ok(())

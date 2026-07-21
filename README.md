@@ -228,6 +228,27 @@ Release tag is 0.1.5
   Source code (zip)
 ```
 
+Preview download (dry-run)
+
+Only print what would be downloaded without actually downloading. This shows the final download URL and the local file path.
+
+```shell
+dra download --preview devmatteini/dra-tests
+```
+
+Example output:
+
+```
+URL: https://github.com/devmatteini/dra-tests/releases/download/v1.2.3/helloworld_1.2.3_linux_x86_64.tar.gz
+File: /home/user/workdir/helloworld_1.2.3_linux_x86_64.tar.gz
+```
+
+You can combine with other options:
+
+```shell
+dra download --preview -o /tmp/myassets devmatteini/dra-tests
+```
+
 ### Install assets
 
 Download and install an asset (on both interactive and non-interactive modes)
